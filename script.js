@@ -42,9 +42,56 @@ function addCodeToEnd(originalCode, addition) {
     return originalCode + "\n" + addition;
 }
 
+const systemMessageText = `
+あなたはJavaScriptコード生成アシスタントです。ユーザーの指示に応じてJavaScriptファイルを作成してください。
+function_callingを２つ用意していて、
+* 作成と追加は「create_or_add_code」
+* 更新や削除は「generate_replacements」
+を利用してください。
+
+注意１: コードを削除する場合は、置換するコードを空文字列に設定してください。同じコードが複数回現れる場合は、特定の箇所のみが削除されるように注意してください。
+注意２: コードの更新や削除の場合は同じコードが複数存在することがあります。その場合はどれのプログラムを更新/削除するかを特定して検索置換するためのプログラムを前後2~3行の出力を行ってください。
+
+例えば同じコードが連続して並んでいて１つだけを残したい場合は、
+[{
+    original:"console.log('hoge');\nalert('huga');\nconsole.log('hoge');\nalert('huga');"
+    updated:"console.log('hoge');\nalert('huga');"
+}]
+というように１つだけを残して出力すると、全部が消えることはありません。
+`
+
+// 会話履歴を読み取る関数
+function readConversationHistory(filePath) {
+    const systemMessage = {
+        role: "system",
+        content: systemMessageText
+    };
+
+    if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf8');
+        try {
+            const conversation = JSON.parse(data);
+            if (conversation.messages.length === 0) {
+                conversation.messages.push(systemMessage);
+            }
+            return conversation;
+        } catch (error) {
+            // ファイルが空または無効なJSONの場合、空の会話履歴を返す
+            return { messages: [systemMessage] };
+        }
+    } else {
+        return { messages: [systemMessage] };
+    }
+}
+
+// 会話結果を保存する関数
+function saveConversationHistory(filePath, conversation) {
+    fs.writeFileSync(filePath, JSON.stringify(conversation, null, 2));
+}
+
 
 // ユーザー入力から更新元と更新後のコードリストを生成または新しいコードを作成する関数
-async function handleInstructions(instructions, originalCode) {
+async function handleInstructions(instructions, originalCode, conversation) {
     const functions = [
         {
             type: "function",
@@ -60,7 +107,7 @@ async function handleInstructions(instructions, originalCode) {
                                 type: "object",
                                 properties: {
                                     original: { type: "string", description: "置換したい元のコード" },
-                                    updated: { type: "string", description: "新しいコード" },
+                                    updated: { type: "string", description: "新しいコード（削除の場合は空文字列）" },
                                 },
                                 required: ["original", "updated"],
                             },
@@ -85,26 +132,7 @@ async function handleInstructions(instructions, originalCode) {
                     required: ["new_code"],
                 },
             }
-        },
-        {
-            type: "function",
-            function:
-            {
-                name: "delete_code",
-                description: "ユーザーの指示に基づいてコードの特定の部分を削除します",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        deletions: {
-                            type: "array",
-                            items: { type: "string", description: "削除したいコードのセグメント" },
-                            description: "削除するコードのセグメントのリスト",
-                        },
-                    },
-                    required: ["deletions"],
-                },
-            }
-        },
+        }
     ];
 
     const messages = [
@@ -117,11 +145,13 @@ async function handleInstructions(instructions, originalCode) {
         },
     ];
 
+    conversation.messages.push(...messages);
+
     try {
         console.log("start")
         const response = await openai.chat.completions.create({
             model: "gpt-4o", // 必要に応じてモデルを変更
-            messages: messages,
+            messages: conversation.messages,
             tools: functions,
             tool_choice: "auto",
         });
@@ -132,17 +162,17 @@ async function handleInstructions(instructions, originalCode) {
         console.log(response.choices);
 
         if (response.choices && response.choices[0]) {
-            console.log("response.choices[0].message:");
-            console.log(response.choices[0].message);
-
-            if (response.choices[0].message.tool_calls) {
+            const choice = response.choices[0];
+            if (choice.message.tool_calls) {
                 const allReplacements = [];
-                const allDeletions = [];
                 let newCode = "";
 
-                response.choices[0].message.tool_calls.forEach((tool_call, index) => {
-                    console.log(`response.choices[0].message.tool_calls[${index}]:`);
-                    console.log(tool_call.function);
+                choice.message.tool_calls.forEach((tool_call, index) => {
+                    const tool_response = tool_call.function;
+                    conversation.messages.push({
+                        role: "assistant",
+                        content: JSON.stringify(tool_response.arguments)
+                    });
 
                     if (tool_call.function.name === "generate_replacements") {
                         const { replacements } = JSON.parse(tool_call.function.arguments);
@@ -153,22 +183,12 @@ async function handleInstructions(instructions, originalCode) {
                         newCode = JSON.parse(tool_call.function.arguments).new_code;
                         console.log(`new code from tool_call[${index}]:`);
                         console.log(newCode);
-                    } else if (tool_call.function.name === "delete_code") {
-                        const { deletions } = JSON.parse(tool_call.function.arguments);
-                        console.log(`deletions from tool_call[${index}]:`);
-                        console.log(deletions);
-                        allDeletions.push(...deletions);
-                    } 
+                    }
                 });
 
                 if (allReplacements.length > 0) {
                     const updatedCode = updateCodeWithReplacements(originalCode, allReplacements);
                     return { type: "update", code: updatedCode };
-                }
-
-                if (allDeletions.length > 0) {
-                    const updatedCode = deleteCodeSegments(originalCode, allDeletions);
-                    return { type: "delete", code: updatedCode };
                 }
 
                 if (newCode) {
@@ -186,6 +206,8 @@ async function handleInstructions(instructions, originalCode) {
         console.error("Function Calling中にエラーが発生しました:", error);
         return null;
     }
+
+    return null;
 }
 
 // ユーザーの指示をハードコード
@@ -205,6 +227,9 @@ async function getUserInstructions() {
 
 // メイン関数
 async function main() {
+    const conversationHistoryPath = 'conversation_history.json';
+    let conversation = readConversationHistory(conversationHistoryPath);
+
     let instructions;
 
     if (userInstructions.trim()) {
@@ -213,7 +238,7 @@ async function main() {
         instructions = await getUserInstructions();
     }
 
-    const result = await handleInstructions(instructions, originalCode);
+    const result = await handleInstructions(instructions, originalCode, conversation);
     console.log(result)
     if (result) {
         const updatedFileName = "originalCode.js"; // ファイル名をハードコード
@@ -222,9 +247,10 @@ async function main() {
             console.log(`コードが正常に更新されました。${updatedFileName}に保存されました。`);
         } else if (result.type === "delete") {
             fs.writeFileSync(updatedFileName, result.code);
-            console.log(`コードが正常に削除されました${updatedFileName}に保存されました。`);
+            console.log(`コードが正常に削除されました。${updatedFileName}に保存されました。`);
         }
     }
+    saveConversationHistory(conversationHistoryPath, conversation);
 
     rl.close();
 }
