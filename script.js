@@ -42,45 +42,21 @@ function addCodeToEnd(originalCode, addition) {
     return originalCode + "\n" + addition;
 }
 
-const systemMessageText = `
-あなたはJavaScriptコード生成アシスタントです。ユーザーの指示に応じてJavaScriptファイルを作成してください。
-function_callingを２つ用意していて、
-* 作成と追加は「create_or_add_code」
-* 更新や削除は「generate_replacements」
-を利用してください。
-
-注意１: コードを削除する場合は、置換するコードを空文字列に設定してください。同じコードが複数回現れる場合は、特定の箇所のみが削除されるように注意してください。
-注意２: コードの更新や削除の場合は同じコードが複数存在することがあります。その場合はどれのプログラムを更新/削除するかを特定して検索置換するためのプログラムを前後2~3行の出力を行ってください。
-
-例えば同じコードが連続して並んでいて１つだけを残したい場合は、
-[{
-    original:"console.log('hoge');\nalert('huga');\nconsole.log('hoge');\nalert('huga');"
-    updated:"console.log('hoge');\nalert('huga');"
-}]
-というように１つだけを残して出力すると、全部が消えることはありません。
-`
 
 // 会話履歴を読み取る関数
 function readConversationHistory(filePath) {
-    const systemMessage = {
-        role: "system",
-        content: systemMessageText
-    };
 
     if (fs.existsSync(filePath)) {
         const data = fs.readFileSync(filePath, 'utf8');
         try {
             const conversation = JSON.parse(data);
-            if (conversation.messages.length === 0) {
-                conversation.messages.push(systemMessage);
-            }
             return conversation;
         } catch (error) {
             // ファイルが空または無効なJSONの場合、空の会話履歴を返す
-            return { messages: [systemMessage] };
+            return { messages: [] };
         }
     } else {
-        return { messages: [systemMessage] };
+        return { messages: [] };
     }
 }
 
@@ -135,23 +111,52 @@ async function handleInstructions(instructions, originalCode, conversation) {
         }
     ];
 
+    const message = {
+        role: "user",
+        content: instructions,
+    }
+    conversation.messages.push(message);
+
+    const systemMessageText = `
+    あなたはJavaScriptコード生成アシスタントです。ユーザーの指示に応じてJavaScriptファイルを作成してください。
+    function_callingを２つ用意していて、
+    * 作成と追加は「create_or_add_code」
+    * 更新や削除は「generate_replacements」
+    を利用してください。
+    
+    注意１: コードを削除する場合は、置換するコードを空文字列に設定してください。同じコードが複数回現れる場合は、特定の箇所のみが削除されるように注意してください。
+    注意２: コードの更新や削除の場合は同じコードが複数存在することがあります。その場合はどれのプログラムを更新/削除するかを特定して検索置換するためのプログラムを前後2~3行の出力を行ってください。
+    
+    例えば同じコードが連続して並んでいて１つだけを残したい場合は、
+    [{
+        original:"console.log('hoge');\nalert('huga');\nconsole.log('hoge');\nalert('huga');"
+        updated:"console.log('hoge');\nalert('huga');"
+    }]
+    というように１つだけを残して出力すると、全部が消えることはありません。
+    
+    現在のコード:
+    \`\`\`javascript
+    ${originalCode}
+    \`\`\`
+    `
+
+    const systemMessage = {
+        role: "system",
+        content: systemMessageText
+    };
+
     const messages = [
-        {
-            role: "user",
-            content: JSON.stringify({
-                instructions: instructions,
-                original: originalCode,
-            }),
-        },
+        systemMessage,
+        ...conversation.messages
     ];
 
-    conversation.messages.push(...messages);
 
     try {
         console.log("start")
+        console.log(messages)
         const response = await openai.chat.completions.create({
             model: "gpt-4o", // 必要に応じてモデルを変更
-            messages: conversation.messages,
+            messages: messages,
             tools: functions,
             tool_choice: "auto",
         });
