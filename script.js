@@ -134,7 +134,7 @@ async function handleInstructions(instructions, originalCode, conversation) {
     }]
     というように１つだけを残して出力すると、全部が消えることはありません。
     
-    現在のコード:
+    会話のやりとりで生成された最新のJavaScriptコード:
     \`\`\`javascript
     ${originalCode}
     \`\`\`
