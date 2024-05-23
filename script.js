@@ -89,8 +89,9 @@ async function handleInstructions(instructions, originalCode, conversation) {
                             },
                             description: "元のコードと新しいコードの置換リスト",
                         },
+                        result_message: { type: "string",description: "作成指示に対して生成されたJavaScriptのコードをテキストで説明" }
                     },
-                    required: ["replacements"],
+                    required: ["replacements","result_message"],
                 },
             },
         },
@@ -104,8 +105,9 @@ async function handleInstructions(instructions, originalCode, conversation) {
                     type: "object",
                     properties: {
                         new_code: { type: "string", description: "ユーザーの指示から出力されるJavaScriptコード" },
+                        result_message: { type: "string",description: "作成指示に対して生成されたJavaScriptのコードをテキストで説明" }
                     },
-                    required: ["new_code"],
+                    required: ["new_code","result_message"],
                 },
             }
         }
@@ -133,7 +135,7 @@ async function handleInstructions(instructions, originalCode, conversation) {
     ${originalCode}
     \`\`\`
 
-    会話履歴のassistantに含めているJavaScriptは過去にAPIから返却されたFunctionCallingに含まれていた、JavaScriptの作成履歴が含まれる場合があります。
+    同時に複数人が同じJavaScriptファイルを修正することがあるため作成された過程のJavaScriptログについては出力されません。
     `
     const message = {
         role: "user",
@@ -180,7 +182,7 @@ async function handleInstructions(instructions, originalCode, conversation) {
                     const tool_response = tool_call.function;
                     conversation.messages.push({
                         role: "assistant",
-                        content: JSON.stringify(tool_response.arguments)
+                        content: JSON.parse(tool_response.arguments).result_message
                     });
 
                     if (tool_call.function.name === "generate_replacements") {
