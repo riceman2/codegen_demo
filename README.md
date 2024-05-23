@@ -42,3 +42,7 @@ node script.js
 ```
 
 スクリプトは、ユーザーの指示に基づいて、originalCode.js ファイルを読み込み、コードの操作を行います。
+
+## 確認方法
+* originalCode.jsに最新のJavaScriptファイルが生成されます。初回から自由に自身の好きなJavaScriptコードを設置することも可能です。
+* conversation_history.jsonに会話履歴が出力されます
