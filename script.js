@@ -111,12 +111,6 @@ async function handleInstructions(instructions, originalCode, conversation) {
         }
     ];
 
-    const message = {
-        role: "user",
-        content: instructions,
-    }
-    conversation.messages.push(message);
-
     const systemMessageText = `
     あなたはJavaScriptコード生成アシスタントです。ユーザーの指示に応じてJavaScriptファイルを作成してください。
     function_callingを２つ用意していて、
@@ -138,12 +132,22 @@ async function handleInstructions(instructions, originalCode, conversation) {
     \`\`\`javascript
     ${originalCode}
     \`\`\`
+
+    会話履歴のassistantに含めているJavaScriptは過去にAPIから返却されたFunctionCallingに含まれていた、JavaScriptの作成履歴が含まれる場合があります。
     `
+    const message = {
+        role: "user",
+        content: instructions,
+    }
 
     const systemMessage = {
         role: "system",
         content: systemMessageText
     };
+
+    conversation.system = systemMessage
+    conversation.messages.push(message);
+
 
     const messages = [
         systemMessage,
